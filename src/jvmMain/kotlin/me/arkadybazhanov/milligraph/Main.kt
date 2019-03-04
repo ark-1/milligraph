@@ -45,9 +45,8 @@ private fun startBot() = bot {
 
     dispatch {
         redirect(publicChannelId) {
-            println(it.message!!.text)
             val text = it.message!!.text ?: return@redirect true
-            "лол" !in text.split("[^a-zA-Z0-9а-яА-ЯёЁ_]".toRegex()).also(::println)
+            "лол" !in text.split("[^a-zA-Z0-9а-яА-ЯёЁ_]".toRegex())
         }
 
         redirect(privateChannelId)
