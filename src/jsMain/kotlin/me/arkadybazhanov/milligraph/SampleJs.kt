@@ -9,20 +9,24 @@ import kotlin.browser.document
 
 fun parsePostList(serialized: String): List<Post> = Json.parse(Post.serializer().list, serialized)
 
+inline fun <T, C : TagConsumer<T>, I> C.makeTable(items: Iterable<I>, crossinline row: TD.(I) -> Unit) {
+    table {
+        tbody {
+            for (item in items) tr {
+                td { row(item) }
+            }
+        }
+    }
+}
+
 @Suppress("unused")
 @JsName(renderFunctionName)
 fun render(serializedPostList: String) {
     val posts = parsePostList(serializedPostList)
 
     (document.getElementById(jsResponseElementId) as HTMLElement).append {
-        table {
-            tbody {
-                for (post in posts) {
-                    tr {
-                        td { +post.textContent }
-                    }
-                }
-            }
+        makeTable(posts) {
+            +it.textContent
         }
     }
 }

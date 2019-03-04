@@ -10,14 +10,16 @@ import kotlinx.html.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.list
 import me.ivmg.telegram.*
-import me.ivmg.telegram.dispatcher.*
+import me.ivmg.telegram.dispatcher.Dispatcher
+import me.ivmg.telegram.dispatcher.handlers.Handler
+import me.ivmg.telegram.entities.Update
 import org.apache.commons.text.StringEscapeUtils
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.*
 import java.io.File
 import java.sql.Connection
 
-fun initDB(dbFilePath: String) {
+private fun initDB(dbFilePath: String) {
     Database.connect("jdbc:sqlite:$dbFilePath", "org.sqlite.JDBC")
     TransactionManager.manager.defaultIsolationLevel = Connection.TRANSACTION_SERIALIZABLE
 
@@ -26,22 +28,29 @@ fun initDB(dbFilePath: String) {
     }
 }
 
-fun startBot() = bot {
+private fun Dispatcher.redirect(toChatId: Long, predicate: (Update) -> Boolean = { true }) {
+    addHandler(object : Handler({ bot, update ->
+        val message = update.message ?: error("WTF no message")
+        bot.forwardMessage(toChatId, message.chat.id, message.messageId)
+    }) {
+        override val groupIdentifier get() = "Messages"
+        override fun checkUpdate(update: Update): Boolean = update.message != null && predicate(update)
+    })
+}
+
+private fun startBot() = bot {
     token = System.getenv("telegram_api_token") ?: error("No telegram api token")
+    val publicChannelId = System.getenv("public_channel_id")?.toLong() ?: error("No public channel id")
+    val privateChannelId = System.getenv("private_channel_id")?.toLong() ?: error("No private channel id")
 
     dispatch {
-        text { bot, update ->
-            val message = update.message ?: error("WTF no message")
-            val text = message.text ?: error("WTF no text")
-
-            transaction {
-                PostEntity.new(message.messageId) {
-                    textContent = text
-                }
-            }
-
-            bot.sendMessage(message.chat.id, "hah gotcha $text")
+        redirect(publicChannelId) {
+            println(it.message!!.text)
+            val text = it.message!!.text ?: return@redirect true
+            "лол" !in text.split("[^a-zA-Z0-9а-яА-ЯёЁ_]".toRegex()).also(::println)
         }
+
+        redirect(privateChannelId)
     }
 }.startPolling()
 
