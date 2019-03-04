@@ -10,9 +10,9 @@ import kotlinx.html.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.list
 import me.ivmg.telegram.*
-import me.ivmg.telegram.dispatcher.Dispatcher
+import me.ivmg.telegram.dispatcher.*
 import me.ivmg.telegram.dispatcher.handlers.Handler
-import me.ivmg.telegram.entities.Update
+import me.ivmg.telegram.entities.*
 import org.apache.commons.text.StringEscapeUtils
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.*
@@ -28,14 +28,50 @@ private fun initDB(dbFilePath: String) {
     }
 }
 
-private fun Dispatcher.redirect(toChatId: Long, predicate: (Update) -> Boolean = { true }) {
-    addHandler(object : Handler({ bot, update ->
-        val message = update.message ?: error("WTF no message")
-        bot.forwardMessage(toChatId, message.chat.id, message.messageId)
-    }) {
+private fun Dispatcher.eachPost(toChatId: Long, callback: (Message) -> Unit) {
+    addHandler(object : Handler({ _, update -> callback(update.channelPost!!) }) {
         override val groupIdentifier get() = "Messages"
-        override fun checkUpdate(update: Update): Boolean = update.message != null && predicate(update)
+        override fun checkUpdate(update: Update): Boolean =
+            update.channelPost != null && update.channelPost!!.chat.id.also(::println) == toChatId
     })
+}
+
+private fun Dispatcher.saveEachMessage(channelId: Long, isPublic: Boolean) {
+    eachPost(channelId) {
+        transaction {
+            PostEntity.new(it.messageId) {
+                timestamp = it.date
+                author = it.from?.firstName.toString()
+                this.isPublic = isPublic
+                chatId = channelId
+            }
+        }
+    }
+}
+
+private fun Dispatcher.verify() {
+    command("verify") { bot, update ->
+        val posts = transaction {
+            PostEntity.all().map { it.toData() }
+        }
+
+        val toRemove = mutableListOf<Long>()
+
+        for (post in posts) {
+            val remove = bot.forwardMessage(
+                chatId = update.message!!.chat.id,
+                fromChatId = post.chatId,
+                messageId = post.id,
+                disableNotification = true
+            ).first?.body()?.result == null
+
+            if (remove) toRemove += post.id
+        }
+
+        transaction {
+            Posts.deleteWhere { Posts.id inList toRemove }
+        }
+    }
 }
 
 private fun startBot() = bot {
@@ -44,12 +80,16 @@ private fun startBot() = bot {
     val privateChannelId = System.getenv("private_channel_id")?.toLong() ?: error("No private channel id")
 
     dispatch {
-        redirect(publicChannelId) {
-            val text = it.message!!.text ?: return@redirect true
-            "лол" !in text.split("[^a-zA-Z0-9а-яА-ЯёЁ_]".toRegex())
+        verify()
+
+        command("send") { bot, update, args ->
+            bot.sendMessage(privateChannelId, args.joinToString(", "))
+            val msg = update.message!!
+            bot.deleteMessage(msg.chat.id, msg.messageId)
         }
 
-        redirect(privateChannelId)
+        saveEachMessage(publicChannelId, isPublic = true)
+        saveEachMessage(privateChannelId, isPublic = false)
     }
 }.startPolling()
 
@@ -70,7 +110,7 @@ fun startServer() = embeddedServer(Netty, port = 8080, host = "127.0.0.1") {
     routing {
         get("/") {
             val posts = transaction {
-                PostEntity.all().map(PostEntity::toData)
+                PostEntity.all().map(PostEntity::toData).sortedBy { it.timestamp }
             }
             val postsS = StringEscapeUtils.escapeEcmaScript(Json.stringify(Post.serializer().list, posts))!!
 

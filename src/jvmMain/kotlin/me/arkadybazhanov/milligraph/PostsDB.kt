@@ -6,14 +6,20 @@ import org.jetbrains.exposed.sql.Column
 object Posts : IdTable<Long>() {
     override val id: Column<EntityID<Long>> = long(this::id.name).primaryKey().entityId()
 
-    val textContent: Column<String> = text(this::textContent.name)
+    val timestamp: Column<Int> = integer(this::timestamp.name)
+    val author: Column<String> = varchar(this::author.name, length = 100)
+    val isPublic: Column<Boolean> = bool(this::isPublic.name)
+    val chatId: Column<Long> = long(this::chatId.name)
 }
 
 class PostEntity(id: EntityID<Long>) : LongEntity(id) {
     companion object : LongEntityClass<PostEntity>(Posts)
 
-    var textContent by Posts.textContent
+    var timestamp by Posts.timestamp
+    var author by Posts.author
+    var isPublic by Posts.isPublic
+    var chatId by Posts.chatId
 
-    fun toData() = Post(id.value, textContent)
+    fun toData() = Post(id.value, timestamp, author, isPublic, chatId)
 }
 
